@@ -1,3 +1,4 @@
+import httpx
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from . import models, schemas  # Added schemas here
@@ -99,3 +100,34 @@ def delete_book(book_id: int, db: Session = Depends(get_db)):
     db.commit()
     
     return {"message": f"Book with ID {book_id} has been deleted successfully."}
+
+# 8. ADD BOOK BY ISBN (Automated)
+@app.post("/books/isbn/{isbn}", response_model=schemas.BookResponse)
+async def add_book_by_isbn(isbn: str, db: Session = Depends(get_db)):
+    # 1. Ask Open Library for the book info
+    url = f"https://openlibrary.org/api/books?bibkeys=ISBN:{isbn}&format=json&jscmd=data"
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url)
+        data = response.json()
+
+    # 2. Check if the book was actually found
+    isbn_key = f"ISBN:{isbn}"
+    if isbn_key not in data:
+        raise HTTPException(status_code=404, detail="Book not found in Open Library")
+
+    book_info = data[isbn_key]
+    
+    # 3. Create the new book record using fetched data
+    new_book = models.Book(
+        title=book_info.get("title", "Unknown Title"),
+        author=book_info.get("authors", [{"name": "Unknown"}])[0]["name"],
+        pages=book_info.get("number_of_pages", 0),
+        status="To Read"
+    )
+
+    db.add(new_book)
+    db.commit()
+    db.refresh(new_book)
+    
+    return new_book
