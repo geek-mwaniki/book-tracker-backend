@@ -1,0 +1,14 @@
+# Ignore the virtual environment (it's huge and unnecessary for GitHub)
+venv/
+env/
+
+# Ignore Python cache files (temporary files Python creates)
+__pycache__/
+*.pyc
+
+# Ignore environment variables (where you might hide secret passwords later)
+.env
+
+# Ignore OS-specific junk
+.DS_Store
+Thumbs.db
