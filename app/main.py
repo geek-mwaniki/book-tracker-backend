@@ -1,12 +1,17 @@
-import httpx
-from fastapi import FastAPI, Depends, HTTPException
+import os
+import shutil
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File # <--- MUST HAVE 'File' and 'UploadFile'
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from . import models, schemas  # Added schemas here
+from . import models, schemas
 from .database import engine, SessionLocal
+from fastapi.staticfiles import StaticFiles
 
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="My Book Tracker API")
+# This tells FastAPI: "If someone asks for /files, look in the uploaded_books folder"
+app.mount("/files", StaticFiles(directory="uploaded_books"), name="files")
 
 def get_db():
     db = SessionLocal()
@@ -131,3 +136,47 @@ async def add_book_by_isbn(isbn: str, db: Session = Depends(get_db)):
     db.refresh(new_book)
     
     return new_book
+
+# 9. UPLOAD A BOOK FILE
+@app.post("/books/{book_id}/upload")
+async def upload_book_file(book_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    # 1. First, check if the book even exists in our database
+    book = db.query(models.Book).filter(models.Book.id == book_id).first()
+    
+    if not book:
+        # This stops the code here and sends an error to your phone
+        raise HTTPException(status_code=404, detail=f"Book with ID {book_id} not found. Create the book entry first!")
+
+    # 2. Create a folder for files if it doesn't exist
+    if not os.path.exists("uploaded_books"):
+        os.makedirs("uploaded_books")
+
+    # 3. Define where to save the file
+    file_location = f"uploaded_books/{file.filename}"
+    
+    # 4. Save the actual file to your computer
+    with open(file_location, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # 5. Now it's safe to update the file_path because we know 'book' is not None
+    book.file_path = file_location
+    db.commit()
+
+    return {"info": f"File '{file.filename}' saved for book ID {book_id}"}
+
+# 10. DOWNLOAD / VIEW BOOK FILE
+@app.get("/books/{book_id}/read")
+def read_book_file(book_id: int, db: Session = Depends(get_db)):
+    # 1. Find the book
+    book = db.query(models.Book).filter(models.Book.id == book_id).first()
+    
+    # 2. Check if the book exists and has a file
+    if not book or not book.file_path:
+        raise HTTPException(status_code=404, detail="Book file not found. Have you uploaded it?")
+    
+    # 3. Check if the file actually exists on the computer disk
+    if not os.path.exists(book.file_path):
+        raise HTTPException(status_code=404, detail="File missing on server.")
+
+    # 4. Send the file to your phone/browser
+    return FileResponse(book.file_path)
